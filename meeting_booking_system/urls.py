@@ -1,4 +1,7 @@
 from django.urls import path
-from .views import health
+from .views import health, register_user
 
-urlpatterns = [path("health/", health)]
+urlpatterns = [
+    path("health/", health),
+    path("auth/register/", register_user),
+]
