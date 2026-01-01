@@ -3,7 +3,10 @@ from rest_framework.response import Response
 from app.pydantic import user_validators
 from pydantic import ValidationError
 from .models import User
-from django.contrib.auth.hashers import make_password
+from django.contrib.auth.hashers import make_password, check_password
+import jwt
+import os
+from .serializers.user_serializer import UserSerializer
 
 
 @api_view(["GET"])
@@ -74,3 +77,56 @@ def register_user(request):
             },
             500,
         )
+
+
+@api_view(["POST"])
+def login_user(request):
+    try:
+        # validate the request body
+        validated_data = user_validators.LoginUserValidator(**request.data)
+    except ValidationError as e:
+        return Response(
+            {
+                "status": "error",
+                "message": "Failed in type validation.",
+                "errors": e.errors(),
+            },
+            400,
+        )
+
+    # check if a user exists with this email
+    found_user = User.objects.filter(email=validated_data.email).first()
+
+    if not found_user:
+        return Response({"status": "error", "message": "Invalid credentials."}, 401)
+
+    # check the password
+    verify_password = check_password(
+        validated_data.password, found_user.password, setter=None, preferred="default"
+    )
+
+    if not verify_password:
+        return Response({"status": "error", "message": "Invalid credentials."}, 401)
+
+    try:
+        # serialize the user document
+        serialized_user = UserSerializer(found_user, many=False)
+
+        # build a jwt
+        jwt_secret = os.getenv("JWT_SECRET")
+
+        jwt_hash = jwt.encode(
+            {"user_id": serialized_user.data["id"]}, jwt_secret, algorithm="HS256"  # type: ignore
+        )
+
+        # return to client
+        response = Response(
+            {"status": "success", "message": "User logged in successfully."}, 200
+        )
+        response.set_cookie(
+            "access_cookie", jwt_hash, max_age=3600 * 24 * 30, httponly=True
+        )
+        return response
+
+    except Exception as e:
+        return Response({"status": "error", "message": "Something went wrong."}, 500)
