@@ -31,9 +31,9 @@ class User(models.Model):
 class Timeslot(models.Model):
     id = models.UUIDField(primary_key=True, default=uuid4, editable=False)
 
-    from_time = models.DateTimeField()
+    from_time = models.TimeField()
 
-    to_time = models.DateTimeField()
+    to_time = models.TimeField()
 
     timezone = models.CharField(
         max_length=65, choices=get_timezone_choices(), default="UTC"
@@ -103,15 +103,13 @@ class Booking(models.Model):
         max_length=50, choices=MeetingPlatforms.choices, default=MeetingPlatforms.ZOOM
     )
 
-    attendes = models.ManyToManyField(
-        User, through="Attendee", related_name="bookings"
-    )
+    attendes = models.ManyToManyField(User, through="Attendee", related_name="bookings")
 
     user = models.ForeignKey(User, on_delete=models.CASCADE)
 
     timeslot = models.ForeignKey(
-        Timeslot, on_delete=models.CASCADE
-    )  # add timeslot model id
+        Timeslot, on_delete=models.CASCADE, null=True, blank=True
+    )
 
     status = models.CharField(
         max_length=50,
