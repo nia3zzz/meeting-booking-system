@@ -1,6 +1,6 @@
 from rest_framework.decorators import api_view
 from rest_framework.response import Response
-from app.pydantic import user_validators
+from app.pydantic import user_validators, booking_validators
 from pydantic import ValidationError
 from .models import User
 from django.contrib.auth.hashers import make_password, check_password
@@ -9,6 +9,9 @@ import os
 from .serializers.user_serializer import UserSerializer
 from .models import Booking, Timeslot, TimeslotSuggestion, Attendee
 from app.auth.token_validator import validate_jwt
+from datetime import datetime, time
+from _zoneinfo import ZoneInfo
+from .serializers.timeslot_serializer import TimeSlotSerializer
 
 
 @api_view(["GET"])
@@ -150,7 +153,7 @@ def create_meeting_poll(request):
 
     try:
         # validate the request body
-        validated_data = user_validators.CreateMeetingPollValidator(**request.data)
+        validated_data = booking_validators.CreateMeetingPollValidator(**request.data)
     except ValidationError as e:
         return Response(
             {
@@ -215,15 +218,105 @@ def create_meeting_poll(request):
 
         booking_time_slot_suggestion.save()
 
+        # count all the attendees
+        attendees_number = Attendee.objects.filter(booking=create_booking).count()
+
         return Response(
             {
                 "status": "success",
                 "message": "Meeting booked successfully.",
-                "data": {"id": create_booking.id},
+                "data": {
+                    "id": create_booking.id,
+                    "title": create_booking.title,
+                    "duration": create_booking.duration,
+                    "date": create_booking.date,
+                    "time_zone": create_booking.time_zone,
+                    "meeting_platform": create_booking.meeting_platform,
+                    "attendees_number": attendees_number,
+                    "status": create_booking.status,
+                },
             },
             201,
         )
     except Exception:
+        return Response(
+            {
+                "status": "error",
+                "message": "Something went wrong.",
+            },
+            500,
+        )
+
+
+@api_view(["GET"])
+def get_timeslots(request):
+    # validate the user authentication
+    user = validate_jwt(request)
+
+    if not user:
+        return Response(
+            {
+                "status": "error",
+                "message": "Unauthorized.",
+            },
+            401,
+        )
+
+    try:
+        # validate the query
+        validated_query = booking_validators.GetTimeslotsValidator(
+            date=request.query_params.get("date"),
+            time_zone=request.query_params.get("time_zone"),
+        )
+    except ValidationError as e:
+        return Response(
+            {
+                "status": "error",
+                "message": "Failed in query validation.",
+                "errors": [str(err) for err in e.errors()],
+            },
+            400,
+        )
+
+    try:
+        # time zone variable and custom type validation
+        validated_time_zone = ZoneInfo(validated_query.time_zone)
+
+        # start end of day in client timezone
+        day_start_local = datetime.combine(validated_query.date, time.min).replace(
+            tzinfo=validated_time_zone
+        )
+        day_end_local = datetime.combine(validated_query.date, time.max).replace(
+            tzinfo=validated_time_zone
+        )
+
+        utc = ZoneInfo("UTC")
+
+        # convert to UTC
+        day_start_utc = day_start_local.astimezone(utc)
+        day_end_utc = day_end_local.astimezone(utc)
+
+        # fetch the time slots
+        bookings = Booking.objects.filter(
+            status="confirmed", start_at__gte=day_start_utc, end_at__lte=day_end_utc
+        ).order_by("start_at")
+
+        available_timeslots = Timeslot.objects.exclude(
+            id__in=bookings.values_list("timeslot_id", flat=True)
+        )
+
+        # serialize and return the timeslots
+        serialized_timeslots = TimeSlotSerializer(available_timeslots, many=True)
+
+        return Response(
+            {
+                "status": "success",
+                "message": "Time slots fetched successfully.",
+                "data": serialized_timeslots.data,
+            },
+            200,
+        )
+    except Exception as e:
         return Response(
             {
                 "status": "error",

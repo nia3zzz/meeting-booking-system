@@ -117,6 +117,10 @@ class Booking(models.Model):
         default=BookingStatuses.REQUESTED,
     )
 
+    start_at = models.DateTimeField(null=True, blank=True)
+
+    end_at = models.DateTimeField(null=True, blank=True)
+
     created_at = models.DateTimeField(auto_now_add=True)
 
     updated_at = models.DateTimeField(auto_now=True)
