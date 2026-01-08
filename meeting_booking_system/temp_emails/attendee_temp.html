@@ -1,0 +1,26 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+  </head>
+  <body>
+    <p>Hello,</p>
+
+    <p>
+      <strong>{{ user_firstname }}</strong> has invited you as an attendee to a
+      meeting.
+    </p>
+
+    <ul>
+      <li><strong>Title:</strong> {{ meeting_title }}</li>
+      <li><strong>Date:</strong> {{ meeting_date }}</li>
+      <li>
+        <strong>Time:</strong> {{ meeting_time }} ({{ meeting_timezone }})
+      </li>
+    </ul>
+
+    <p><a href="{{ view_details_url }}">View Details</a><br /></p>
+
+    <p>Thanks,<br />Meeting Booking System</p>
+  </body>
+</html>

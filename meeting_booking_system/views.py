@@ -12,6 +12,7 @@ from app.auth.token_validator import validate_jwt
 from datetime import datetime, time
 from _zoneinfo import ZoneInfo
 from .serializers.timeslot_serializer import TimeSlotSerializer
+from .temp_emails.mail_funcs import attendee_mail
 
 
 @api_view(["GET"])
@@ -317,6 +318,122 @@ def get_timeslots(request):
             200,
         )
     except Exception as e:
+        return Response(
+            {
+                "status": "error",
+                "message": "Something went wrong.",
+            },
+            500,
+        )
+
+
+@api_view(["POST"])
+def invite_attendee(request):
+    # validate the user authentication
+    user = validate_jwt(request)
+
+    if not user:
+        return Response(
+            {
+                "status": "error",
+                "message": "Unauthorized.",
+            },
+            401,
+        )
+
+    try:
+        # validate the request data
+        validated_data = booking_validators.InviteAttendeeValidator(**request.data)
+    except ValidationError as e:
+        return Response(
+            {
+                "status": "error",
+                "message": "Failed in data validation.",
+                "errors": e.errors(),
+            },
+            400,
+        )
+
+    # check if the booking exists
+    found_booking = Booking.objects.filter(id=validated_data.booking_id).first()
+
+    if not found_booking:
+        return Response(
+            {
+                "status": "error",
+                "message": "Booking not found.",
+            },
+            404,
+        )
+
+    # check if the user exists
+    found_user = User.objects.filter(email=validated_data.attendee_email).first()
+
+    if not found_user:
+        return Response(
+            {
+                "status": "error",
+                "message": "User not found.",
+            },
+            404,
+        )
+
+    # check if the booking is not completed
+    if (
+        found_booking.status == "completed"
+        or found_booking.status == "cancelled"
+        or found_booking.status == "rescheduled"
+    ):
+        return Response(
+            {
+                "status": "error",
+                "message": "Cannot invite attendee to this meeting.",
+            },
+            400,
+        )
+
+    # check if the user is already an attendee
+    if Attendee.objects.filter(user=found_user, booking=found_booking).exists():
+        return Response(
+            {
+                "status": "error",
+                "message": "User is already an attendee of this meeting.",
+            },
+            400,
+        )
+
+    try:
+
+        # create the attendee
+        attendee = Attendee(user=found_user, booking=found_booking)
+        attendee.save()
+
+        # send an email to the attendee user
+        attendee_mail(
+            user_firstname=found_user.first_name,
+            meeting_title=found_booking.title,
+            meeting_date=found_booking.date,
+            meeting_time=found_booking.start_at,
+            meeting_timezone=found_booking.time_zone,
+            view_details_url=f"http://localhost:8000/meetings/{found_booking.id}/",
+            attendee_email=found_user.email,
+        )
+
+        return Response(
+            {
+                "status": "success",
+                "message": "Attendee invited successfully.",
+                "data": {
+                    "id": attendee.id,
+                    "first_name": found_user.first_name,
+                    "last_name": found_user.last_name,
+                    "email": found_user.email,
+                    "invited_at": attendee.created_at,
+                },
+            },
+            201,
+        )
+    except Exception:
         return Response(
             {
                 "status": "error",

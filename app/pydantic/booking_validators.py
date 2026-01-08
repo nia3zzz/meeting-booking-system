@@ -1,7 +1,7 @@
 import zoneinfo
 import typing
 from datetime import date
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, EmailStr
 from enum import IntEnum, Enum
 
 
@@ -49,3 +49,8 @@ class GetTimeslotsValidator(BaseModel):
         except Exception:
             raise ValueError("Invalid IANA timezone")
         return v
+
+
+class InviteAttendeeValidator(BaseModel):
+    attendee_email: EmailStr
+    booking_id: str = Field(min_length=32, max_length=36)
