@@ -441,3 +441,76 @@ def invite_attendee(request):
             },
             500,
         )
+
+
+@api_view(["GET"])
+def get_attendees(request, booking_id):
+    # validate the user authentication
+    user = validate_jwt(request)
+
+    if not user:
+        return Response(
+            {
+                "status": "error",
+                "message": "Unauthorized.",
+            },
+            401,
+        )
+
+    try:
+        # validate the query params
+        validated_query = booking_validators.GetAttendeesValidator(
+            booking_id=booking_id,
+        )
+    except ValidationError as e:
+        return Response(
+            {
+                "status": "error",
+                "message": "Failed in type validation.",
+                "errors": e.errors(),
+            }
+        )
+
+    # check if the booking exists
+    found_booking = Booking.objects.filter(id=validated_query.booking_id).first()
+
+    if not found_booking:
+        return Response(
+            {
+                "status": "error",
+                "message": "Booking not found.",
+            },
+            404,
+        )
+
+    try:
+        # fetch the attendees
+        attendees = Attendee.objects.filter(booking=found_booking)
+
+        attendees_data = []
+        for attendee in attendees:
+            attendee_data = {
+                "id": attendee.id,
+                "first_name": attendee.user.first_name,
+                "last_name": attendee.user.last_name,
+                "email": attendee.user.email,
+                "invited_at": attendee.created_at,
+            }
+            attendees_data.append(attendee_data)
+
+        return Response(
+            {
+                "status": "success",
+                "message": "Attendees fetched successfully.",
+                "data": attendees_data,
+            },
+            200,
+        )
+    except Exception:
+        return Response(
+            {
+                "status": "error",
+                "message": "Something went wrong.",
+            },
+            500,
+        )

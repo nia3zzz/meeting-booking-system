@@ -54,3 +54,7 @@ class GetTimeslotsValidator(BaseModel):
 class InviteAttendeeValidator(BaseModel):
     attendee_email: EmailStr
     booking_id: str = Field(min_length=32, max_length=36)
+
+
+class GetAttendeesValidator(BaseModel):
+    booking_id: str = Field(min_length=32, max_length=36)

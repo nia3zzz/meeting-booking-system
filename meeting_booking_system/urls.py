@@ -6,6 +6,7 @@ from .views import (
     create_meeting_poll,
     get_timeslots,
     invite_attendee,
+    get_attendees,
 )
 
 urlpatterns = [
@@ -15,4 +16,5 @@ urlpatterns = [
     path("meetings/", create_meeting_poll),
     path("timeslots/", get_timeslots),
     path("attendees/", invite_attendee),
+    path("attendees/<str:booking_id>/", get_attendees),
 ]
