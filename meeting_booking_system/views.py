@@ -138,8 +138,8 @@ def login_user(request):
         return Response({"status": "error", "message": "Something went wrong."}, 500)
 
 
-@api_view(["POST"])
-def create_meeting_poll(request):
+@api_view(["GET", "POST"])
+def meeting_polls(request):
     # validate the user authentication
     user = validate_jwt(request)
 
@@ -152,101 +152,171 @@ def create_meeting_poll(request):
             401,
         )
 
-    try:
-        # validate the request body
-        validated_data = booking_validators.CreateMeetingPollValidator(**request.data)
-    except ValidationError as e:
-        return Response(
-            {
-                "status": "error",
-                "message": "Failed in type validation.",
-                "errors": [str(err) for err in e.errors()],
-            },
-            400,
+    # if the request is made on a get method fetch all the meetings of the user
+    if request.method == "GET":
+        # fetch all the bookings of the user
+        bookings = Booking.objects.filter(
+            user=user, status__in=["requested", "confirmed"]
         )
 
-    # validate the time slots
-    timeslot_objs = []
-    for time_slot in validated_data.time_slot_ids:
-        timeslot_obj = Timeslot.objects.filter(id=time_slot).first()
-        if not timeslot_obj:
-            return Response(
+        # construct the response data
+        data = []
+        for booking in bookings:
+            # fetch required data for each booking
+            time_suggestions = TimeslotSuggestion.objects.filter(booking=booking)
+            attendees = Attendee.objects.filter(booking=booking)
+
+            # get all timeslot objects from the suggestions and serialize it
+            suggested_timeslots = Timeslot.objects.filter(
+                id__in=time_suggestions.values_list("timeslot_id", flat=True)
+            )
+            serialized_suggested_timeslots = TimeSlotSerializer(
+                suggested_timeslots, many=True
+            )
+
+            # serialize attendees with details
+            attendees_data = []
+            for attendee in attendees:
+                attendees_data.append(
+                    {
+                        "id": str(attendee.id),
+                        "first_name": attendee.user.first_name,
+                        "last_name": attendee.user.last_name,
+                        "email": attendee.user.email,
+                        "invited_at": attendee.created_at,
+                    }
+                )
+
+            # serialize timeslot if exists
+            timeslot_data = None
+            if booking.timeslot:
+                timeslot_data = TimeSlotSerializer(booking.timeslot).data
+
+            data.append(
                 {
-                    "status": "error",
-                    "message": "Invalid time slot.",
-                },
-                400,
+                    "id": booking.id,
+                    "title": booking.title,
+                    "duration": booking.duration,
+                    "date": booking.date if booking.date else None,
+                    "time_zone": booking.time_zone,
+                    "time_suggestion_by_attendies": serialized_suggested_timeslots.data,
+                    "meeting_platform": booking.meeting_platform,
+                    "attendes": attendees_data,
+                    "timeslot": timeslot_data,
+                    "status": booking.status,
+                    "start_at": (booking.start_at if booking.start_at else None),
+                    "end_at": (booking.end_at if booking.end_at else None),
+                    "created_at": booking.created_at,
+                    "updated_at": booking.updated_at,
+                }
             )
-        timeslot_objs.append(timeslot_obj)
-
-    # check if a meeting is already confirmed on that day
-    if Booking.objects.filter(
-        date=validated_data.date, status="confirmed", timeslot__in=timeslot_objs
-    ).exists():
-        return Response(
-            {
-                "status": "error",
-                "message": "A meeting is already booked on this date.",
-            },
-            400,
-        )
-
-    try:
-        # create the booking
-        create_booking = Booking(
-            title=validated_data.title,
-            duration=validated_data.duration,
-            date=validated_data.date,
-            time_zone=validated_data.time_zone,
-            time_suggestion_by_attendies=validated_data.time_suggestion_by_attendies,
-            meeting_platform=validated_data.meeting_platform,
-            user=user,
-        )
-
-        create_booking.save()
-
-        # save the attendees
-        meeting_attendees = Attendee(user=user, booking=create_booking)
-        meeting_attendees.save()
-
-        # add the time slots to the time slot suggestion table
-        for timeslot in timeslot_objs:
-            booking_time_slot_suggestion = TimeslotSuggestion(
-                user=user,
-                booking=create_booking,
-                timeslot=timeslot,
-            )
-
-        booking_time_slot_suggestion.save()
-
-        # count all the attendees
-        attendees_number = Attendee.objects.filter(booking=create_booking).count()
 
         return Response(
             {
                 "status": "success",
-                "message": "Meeting booked successfully.",
-                "data": {
-                    "id": create_booking.id,
-                    "title": create_booking.title,
-                    "duration": create_booking.duration,
-                    "date": create_booking.date,
-                    "time_zone": create_booking.time_zone,
-                    "meeting_platform": create_booking.meeting_platform,
-                    "attendees_number": attendees_number,
-                    "status": create_booking.status,
+                "message": "Bookings fetched successfully.",
+                "data": data,
+            }
+        )
+
+    elif request.method == "POST":
+        try:
+            # validate the request body
+            validated_data = booking_validators.CreateMeetingPollValidator(
+                **request.data
+            )
+        except ValidationError as e:
+            return Response(
+                {
+                    "status": "error",
+                    "message": "Failed in type validation.",
+                    "errors": [str(err) for err in e.errors()],
                 },
-            },
-            201,
-        )
-    except Exception:
-        return Response(
-            {
-                "status": "error",
-                "message": "Something went wrong.",
-            },
-            500,
-        )
+                400,
+            )
+
+        # validate the time slots
+        timeslot_objs = []
+        for time_slot in validated_data.time_slot_ids:
+            timeslot_obj = Timeslot.objects.filter(id=time_slot).first()
+            if not timeslot_obj:
+                return Response(
+                    {
+                        "status": "error",
+                        "message": "Invalid time slot.",
+                    },
+                    400,
+                )
+            timeslot_objs.append(timeslot_obj)
+
+        # check if a meeting is already confirmed on that day
+        if Booking.objects.filter(
+            date=validated_data.date, status="confirmed", timeslot__in=timeslot_objs
+        ).exists():
+            return Response(
+                {
+                    "status": "error",
+                    "message": "A meeting is already booked on this date.",
+                },
+                400,
+            )
+
+        try:
+            # create the booking
+            create_booking = Booking(
+                title=validated_data.title,
+                duration=validated_data.duration,
+                date=validated_data.date,
+                time_zone=validated_data.time_zone,
+                time_suggestion_by_attendies=validated_data.time_suggestion_by_attendies,
+                meeting_platform=validated_data.meeting_platform,
+                user=user,
+            )
+
+            create_booking.save()
+
+            # save the attendees
+            meeting_attendees = Attendee(user=user, booking=create_booking)
+            meeting_attendees.save()
+
+            # add the time slots to the time slot suggestion table
+            for timeslot in timeslot_objs:
+                booking_time_slot_suggestion = TimeslotSuggestion(
+                    user=user,
+                    booking=create_booking,
+                    timeslot=timeslot,
+                )
+
+            booking_time_slot_suggestion.save()
+
+            # count all the attendees
+            attendees_number = Attendee.objects.filter(booking=create_booking).count()
+
+            return Response(
+                {
+                    "status": "success",
+                    "message": "Meeting booked successfully.",
+                    "data": {
+                        "id": create_booking.id,
+                        "title": create_booking.title,
+                        "duration": create_booking.duration,
+                        "date": create_booking.date,
+                        "time_zone": create_booking.time_zone,
+                        "meeting_platform": create_booking.meeting_platform,
+                        "attendees_number": attendees_number,
+                        "status": create_booking.status,
+                    },
+                },
+                201,
+            )
+        except Exception:
+            return Response(
+                {
+                    "status": "error",
+                    "message": "Something went wrong.",
+                },
+                500,
+            )
 
 
 @api_view(["GET"])
