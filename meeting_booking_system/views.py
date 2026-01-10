@@ -775,3 +775,81 @@ def get_suggested_timeslots(request):
             ],
         }
     )
+
+
+@api_view(["GET"])
+def get_meetings_admin(request):
+    # validate the user authentication
+    user = validate_jwt(request)
+
+    if not user:
+        return Response(
+            {
+                "status": "error",
+                "message": "Unauthorized.",
+            },
+            401,
+        )
+
+    # fetch all the bookings of the user
+    bookings = Booking.objects.filter(status="requested").order_by("created_at")
+
+    # construct the response data
+    data = []
+    for booking in bookings:
+        # fetch required data for each booking
+        time_suggestions = TimeslotSuggestion.objects.filter(booking=booking)
+        attendees = Attendee.objects.filter(booking=booking)
+
+        # get all timeslot objects from the suggestions and serialize it
+        suggested_timeslots = Timeslot.objects.filter(
+            id__in=time_suggestions.values_list("timeslot_id", flat=True)
+        )
+        serialized_suggested_timeslots = TimeSlotSerializer(
+            suggested_timeslots, many=True
+        )
+
+        # serialize attendees with details
+        attendees_data = []
+        for attendee in attendees:
+            attendees_data.append(
+                {
+                    "id": str(attendee.id),
+                    "first_name": attendee.user.first_name,
+                    "last_name": attendee.user.last_name,
+                    "email": attendee.user.email,
+                    "invited_at": attendee.created_at,
+                }
+            )
+
+        # serialize timeslot if exists
+        timeslot_data = None
+        if booking.timeslot:
+            timeslot_data = TimeSlotSerializer(booking.timeslot).data
+
+        data.append(
+            {
+                "id": booking.id,
+                "title": booking.title,
+                "duration": booking.duration,
+                "date": booking.date if booking.date else None,
+                "time_zone": booking.time_zone,
+                "time_suggestion_by_attendies": serialized_suggested_timeslots.data,
+                "meeting_platform": booking.meeting_platform,
+                "attendes": attendees_data,
+                "timeslot": timeslot_data,
+                "status": booking.status,
+                "start_at": (booking.start_at if booking.start_at else None),
+                "end_at": (booking.end_at if booking.end_at else None),
+                "created_at": booking.created_at,
+                "updated_at": booking.updated_at,
+            }
+        )
+
+    return Response(
+        {
+            "status": "success",
+            "message": "Bookings fetched successfully.",
+            "data": data,
+        }
+    )
