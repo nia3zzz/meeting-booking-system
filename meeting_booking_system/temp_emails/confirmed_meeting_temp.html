@@ -1,0 +1,41 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>Meeting Confirmation</title>
+  </head>
+  <body>
+    <p>Hello,</p>
+
+    <p>
+      This is to confirm that your meeting
+      <strong>{{ meeting_title }}</strong> has been successfully scheduled.
+    </p>
+
+    <ul>
+      <li><strong>Date:</strong> {{ meeting_date }}</li>
+      <li>
+        <strong>Time:</strong> {{ meeting_time }} ({{ meeting_timezone }})
+      </li>
+      <li><strong>Duration:</strong> {{ meeting_duration }} minutes</li>
+      <li><strong>Organizer name:</strong> {{ organizer_name }}</li>
+      <li><strong>Organizer email:</strong> {{ organizer_email }}</li>
+    </ul>
+
+    <p>You can view the full meeting details using the link below:</p>
+
+    <p>
+      <a href="{{ view_details_url }}">View Meeting Details</a>
+    </p>
+
+    <p>
+      If you have any questions or need to make changes, please contact the
+      meeting organizer.
+    </p>
+
+    <p>
+      Thanks,<br />
+      Meeting Booking System
+    </p>
+  </body>
+</html>

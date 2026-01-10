@@ -12,7 +12,7 @@ from app.auth.token_validator import validate_jwt
 from datetime import datetime, time
 from _zoneinfo import ZoneInfo
 from .serializers.timeslot_serializer import TimeSlotSerializer
-from .temp_emails.mail_funcs import attendee_mail
+from .temp_emails.mail_funcs import attendee_mail, confirmed_meeting_mail
 
 
 @api_view(["GET"])
@@ -538,7 +538,8 @@ def get_attendees(request, booking_id):
                 "status": "error",
                 "message": "Failed in type validation.",
                 "errors": e.errors(),
-            }
+            },
+            400,
         )
 
     # check if the booking exists
@@ -573,6 +574,123 @@ def get_attendees(request, booking_id):
                 "status": "success",
                 "message": "Attendees fetched successfully.",
                 "data": attendees_data,
+            },
+            200,
+        )
+    except Exception:
+        return Response(
+            {
+                "status": "error",
+                "message": "Something went wrong.",
+            },
+            500,
+        )
+
+
+@api_view(["POST"])
+def confirm_meeting_admin(request, booking_id):
+    try:
+        # validate the request data
+        validated_data = booking_validators.ConfirmMeetingAdminValidator(
+            booking_id=booking_id, timeslot_id=request.data.get("timeslot_id")
+        )
+    except ValidationError as e:
+        return Response(
+            {
+                "status": "error",
+                "message": "Failed in type validation.",
+                "errors": e.errors(),
+            },
+            400,
+        )
+
+    # check if the booking exists
+    found_booking = Booking.objects.filter(id=validated_data.booking_id).first()
+
+    if not found_booking:
+        return Response(
+            {
+                "status": "error",
+                "message": "Booking not found.",
+            },
+            404,
+        )
+
+    # check if the booking is in requested status
+    if found_booking.status != "requested":
+        return Response(
+            {
+                "status": "error",
+                "message": "Only requested meetings can be confirmed.",
+            },
+            400,
+        )
+
+    # check if the timeslot exists
+    found_timeslot = Timeslot.objects.filter(id=validated_data.timeslot_id).first()
+
+    if not found_timeslot:
+        return Response(
+            {
+                "status": "error",
+                "message": "Timeslot not found.",
+            },
+            404,
+        )
+
+    # check if the found time slot is among the meeting's suggested time slots
+    if not TimeslotSuggestion.objects.filter(
+        booking=found_booking, timeslot=found_timeslot
+    ).exists():
+        return Response(
+            {
+                "status": "error",
+                "message": "Selected timeslot is not among suggested time slots for this meeting.",
+            },
+            400,
+        )
+
+    try:
+        # build the start and end time
+        local_tz = ZoneInfo(found_booking.time_zone)
+
+        start_local = datetime.combine(
+            found_booking.date, found_timeslot.from_time, tzinfo=local_tz
+        )
+
+        end_local = datetime.combine(
+            found_booking.date, found_timeslot.to_time, tzinfo=local_tz
+        )
+
+        # confirm the meeting
+        found_booking.timeslot = found_timeslot
+        found_booking.status = "confirmed"
+        found_booking.start_at = start_local.astimezone(ZoneInfo("UTC"))
+        found_booking.end_at = end_local.astimezone(ZoneInfo("UTC"))
+        found_booking.save()
+
+        # send email to all attendees that the email has been confirmed
+        attendees = Attendee.objects.filter(booking=found_booking)
+        attendee_emails = [attendee.user.email for attendee in attendees]
+
+        confirmed_meeting_mail(
+            meeting_title=found_booking.title,
+            meeting_date=found_booking.date,
+            meeting_time=found_booking.start_at,
+            meeting_timezone=found_booking.time_zone,
+            meeting_duration=found_booking.duration,
+            organizer_name=found_booking.user.first_name
+            + " "
+            + found_booking.user.last_name,
+            organizer_email=found_booking.user.email,
+            view_details_url=f"http://localhost:8000/meetings/{found_booking.id}/",
+            attendee_emails=attendee_emails,
+        )
+
+        return Response(
+            {
+                "status": "success",
+                "message": "Meeting confirmed successfully.",
             },
             200,
         )
