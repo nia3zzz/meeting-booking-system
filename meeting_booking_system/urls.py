@@ -8,6 +8,7 @@ from .views import (
     invite_attendee,
     get_attendees,
     confirm_meeting_admin,
+    get_suggested_timeslots,
 )
 
 urlpatterns = [
@@ -16,6 +17,7 @@ urlpatterns = [
     path("auth/login/", login_user),
     path("meetings/", meeting_polls),
     path("timeslots/", get_timeslots),
+    path("meetings/timeslots/", get_suggested_timeslots),
     path("attendees/", invite_attendee),
     path("attendees/<str:booking_id>/", get_attendees),
     path("admin/meetings/<str:booking_id>", confirm_meeting_admin),

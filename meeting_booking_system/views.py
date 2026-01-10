@@ -589,6 +589,18 @@ def get_attendees(request, booking_id):
 
 @api_view(["POST"])
 def confirm_meeting_admin(request, booking_id):
+    # validate the user authentication
+    user = validate_jwt(request)
+
+    if not user:
+        return Response(
+            {
+                "status": "error",
+                "message": "Unauthorized.",
+            },
+            401,
+        )
+
     try:
         # validate the request data
         validated_data = booking_validators.ConfirmMeetingAdminValidator(
@@ -702,3 +714,64 @@ def confirm_meeting_admin(request, booking_id):
             },
             500,
         )
+
+
+@api_view(["GET"])
+def get_suggested_timeslots(request):
+    # validate the user authentication
+    user = validate_jwt(request)
+
+    if not user:
+        return Response(
+            {
+                "status": "error",
+                "message": "Unauthorized.",
+            },
+            401,
+        )
+
+    try:
+        # validating query using GetAttendeesValidator as it has same field
+        validated_query = booking_validators.GetAttendeesValidator(
+            booking_id=request.query_params.get("booking_id"),
+        )
+    except ValidationError as e:
+        return Response(
+            {
+                "status": "error",
+                "message": "Failed in query validation.",
+                "errors": e.errors(),
+            },
+            400,
+        )
+
+    # check if the booking exists
+    found_booking = Booking.objects.filter(id=validated_query.booking_id).first()
+
+    if not found_booking:
+        return Response({"status": "error", "message": "Booking not found."}, 404)
+
+    # fetch the suggested time slots
+    time_suggestions = TimeslotSuggestion.objects.filter(booking=found_booking)
+
+    return Response(
+        {
+            "status": "success",
+            "message": "Suggested timeslots fetched successfully.",
+            "data": [
+                {
+                    "id": suggestion.id,
+                    "from_time": suggestion.timeslot.from_time,
+                    "to_time": suggestion.timeslot.to_time,
+                    "timezone": suggestion.timeslot.timezone,
+                    "user_id": suggestion.user.id,
+                    "first_name": suggestion.user.first_name,
+                    "last_name": suggestion.user.last_name,
+                    "email": suggestion.user.email,
+                    "created_at": suggestion.created_at,
+                    "updated_at": suggestion.updated_at,
+                }
+                for suggestion in time_suggestions
+            ],
+        }
+    )
