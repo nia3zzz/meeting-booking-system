@@ -63,3 +63,23 @@ class GetAttendeesValidator(BaseModel):
 class ConfirmMeetingAdminValidator(BaseModel):
     booking_id: str = Field(min_length=32, max_length=36)
     timeslot_id: str = Field(min_length=32, max_length=36)
+
+
+class RescheduleMeetingValidator(BaseModel):
+    booking_id: str = Field(min_length=32, max_length=36)
+    title: str = Field(min_length=3, max_length=180)
+    duration: MeetingDurationEnum
+    date: date
+    time_zone: str = Field(default="UTC")
+    time_slot_ids: typing.List[str]
+    time_suggestion_by_attendies: bool = Field(default=False)
+    meeting_platform: MeetingPlatformEnum
+
+    @field_validator("time_zone")
+    @classmethod
+    def validate_timezone(cls, v: str) -> str:
+        try:
+            zoneinfo.ZoneInfo(v)
+        except Exception:
+            raise ValueError("Invalid IANA timezone")
+        return v

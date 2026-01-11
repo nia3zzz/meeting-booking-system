@@ -2,12 +2,18 @@ from rest_framework.decorators import api_view
 from rest_framework.response import Response
 from app.pydantic import user_validators, booking_validators
 from pydantic import ValidationError
-from .models import User
+from .models import (
+    User,
+    RescheduledBookings,
+    Booking,
+    Timeslot,
+    TimeslotSuggestion,
+    Attendee,
+)
 from django.contrib.auth.hashers import make_password, check_password
 import jwt
 import os
 from .serializers.user_serializer import UserSerializer
-from .models import Booking, Timeslot, TimeslotSuggestion, Attendee
 from app.auth.token_validator import validate_jwt
 from datetime import datetime, time
 from _zoneinfo import ZoneInfo
@@ -853,3 +859,147 @@ def get_meetings_admin(request):
             "data": data,
         }
     )
+
+
+@api_view(["PUT"])
+def reschedule_meeting(request, booking_id):
+    # validate the user authentication
+    user = validate_jwt(request)
+
+    if not user:
+        return Response(
+            {
+                "status": "error",
+                "message": "Unauthorized.",
+            },
+            401,
+        )
+
+    try:
+        # validate the request data
+        validated_data = booking_validators.RescheduleMeetingValidator(
+            booking_id=booking_id, **request.data
+        )
+    except ValidationError as e:
+        return Response(
+            {
+                "status": "error",
+                "message": "Failed in type validation.",
+                "errors": [str(err) for err in e.errors()],
+            },
+            400,
+        )
+
+    # check if the booking exists
+    found_booking = Booking.objects.filter(id=validated_data.booking_id).first()
+
+    if not found_booking:
+        return Response(
+            {
+                "status": "error",
+                "message": "Booking not found.",
+            },
+            404,
+        )
+
+    # check if the booking is not completed
+    if (
+        found_booking.status == "completed"
+        or found_booking.status == "rescheduled"
+        or found_booking.status == "cancelled"
+    ):
+        return Response(
+            {
+                "status": "error",
+                "message": "Cannot reschedule this meeting.",
+            },
+            400,
+        )
+
+    try:
+        # validate the time slots
+        timeslot_objs = []
+        for time_slot in validated_data.time_slot_ids:
+            timeslot_obj = Timeslot.objects.filter(id=time_slot).first()
+            if not timeslot_obj:
+                return Response(
+                    {
+                        "status": "error",
+                        "message": "Invalid time slot.",
+                    },
+                    400,
+                )
+            timeslot_objs.append(timeslot_obj)
+
+        # check if a meeting is already confirmed on that day
+        if Booking.objects.filter(
+            date=validated_data.date, status="confirmed", timeslot__in=timeslot_objs
+        ).exists():
+            return Response(
+                {
+                    "status": "error",
+                    "message": "A meeting is already booked on this date.",
+                },
+                400,
+            )
+
+        # create the booking
+        create_booking = Booking(
+            title=validated_data.title,
+            duration=validated_data.duration,
+            date=validated_data.date,
+            time_zone=validated_data.time_zone,
+            time_suggestion_by_attendies=validated_data.time_suggestion_by_attendies,
+            meeting_platform=validated_data.meeting_platform,
+            user=user,
+        )
+
+        create_booking.save()
+
+        # save the attendees
+        meeting_attendees = Attendee(user=user, booking=create_booking)
+        meeting_attendees.save()
+
+        # add the time slots to the time slot suggestion table
+        for timeslot in timeslot_objs:
+            booking_time_slot_suggestion = TimeslotSuggestion(
+                user=user,
+                booking=create_booking,
+                timeslot=timeslot,
+            )
+
+            booking_time_slot_suggestion.save()
+
+        # count all the attendees
+        attendees_number = Attendee.objects.filter(booking=create_booking).count()
+
+        # update the old booking status to rescheduled
+        found_booking.status = "rescheduled"
+        found_booking.save()
+
+        rescheduled_document = RescheduledBookings.objects.create(
+            prev_booking=found_booking,
+            resc_booking=create_booking,
+        )
+
+        rescheduled_document.save()
+
+        return Response(
+            {
+                "status": "success",
+                "message": "Meeting booked successfully.",
+                "data": {
+                    "id": create_booking.id,
+                    "title": create_booking.title,
+                    "duration": create_booking.duration,
+                    "date": create_booking.date,
+                    "time_zone": create_booking.time_zone,
+                    "meeting_platform": create_booking.meeting_platform,
+                    "attendees_number": attendees_number,
+                    "status": create_booking.status,
+                },
+            },
+            201,
+        )
+    except Exception as e:
+        return Response({"status": "error", "message": "Something went wrong."}, 500)
